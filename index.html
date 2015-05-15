@@ -1,15 +1,346 @@
+<!-- NOTE: cannot be run in preview mode because of the external CSS requirement. 
+
+Visit the report from the sidebar dropdown instead of clicking "RUN" -->
+
 <!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8">
     <link rel="stylesheet" type="text/css" href="https://cdn.mxpnl.com/libs/mixpanel-platform/css/reset.css">
     <link rel="stylesheet" type="text/css" href="https://cdn.mxpnl.com/libs/mixpanel-platform/build/mixpanel-platform.v0.latest.min.css">
+    <style type="text/css">
+      .add-event-button {
+        width: 152px;
+        float: left;
+        /*margin: 0 30px;*/
+        background-color: #f6f7f9;
+        background-image: -webkit-linear-gradient(top, #f9fafb, #f2f3f6);
+        border-radius: 3px;
+        -webkit-user-select: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        border: 1px solid #bdc7d2;
+        color: #747d94;
+        cursor: default;
+        font-size: 13px;
+        font-weight: bold;
+        height: 15px;
+        min-width: 150px;
+        padding: 6px 35px 10px 11px;
+      }
+
+      .add-event-button:hover {
+        background-color: #f8f8fa;
+        background-image: -moz-linear-gradient(top, #fcfcfc, #f1f3f6);
+        background-image: -ms-linear-gradient(top, #fcfcfc, #f1f3f6);
+        background-image: -webkit-gradient(linear, 0 0, 0 100%, from(#fcfcfc), to(#f1f3f6));
+        background-image: -webkit-linear-gradient(top, #fcfcfc, #f1f3f6);
+        background-image: -o-linear-gradient(top, #fcfcfc 0, #f1f3f6 0);
+        background-image: linear-gradient(top, #fcfcfc 0, #f1f3f6 0);
+        background-repeat: repeat-x;
+        filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#fcfcfc', endColorstr='#f1f3f6', GradientType=0);
+        border: 1px solid #5ba7e1;
+        border-color: #5ba7e1;
+      }
+
+      .mp_chart_cell {
+        min-width: 116px;
+      }
+    </style>
     <script src="https://cdn.mxpnl.com/libs/mixpanel-platform/build/mixpanel-platform.v0.latest.min.js"></script>
   </head>
   <body class="mixpanel-platform-body">
-    <h1>Hello, World!</h1>
+    <div class="mixpanel-platform-section">
+      <!--<div id="by" class="mixpanel-platform-label" style="margin-left: 10px; display: none;">by</div>-->
+      <div id="add_event_button" class="add-event-button">Add Another Event</div>
+      <!--<div id="propSelect" style="float: left;"></div>-->
+      <div id="dateSelect" style="float: right;"></div>
+      <div id="eventSelect" style="float: left; clear: both;" class="eSel"></div>
+      <div id="dateResolution" style="float: right;"></div>
+      <div id="dateComparison" style="float: right; clear: both;"></div>
+      <div style="clear: both;" id="clearBoth"></div>
+      <div id="graph"></div>
+    </div>
+    <div id="table"></div>
     <script>
-      // Run queries and display results here
+      /**
+       * TODO: Add feature for selecting properties
+       * TODO: Allow for selecting date resolution or date range at any time, 
+       *      instead of before the first event is selected. This feature should utilize
+       *      the "eventTableData" global variable and re-run each MP.api query.
+       * 
+       * Written by Addison Huff - addison@mixpanel.com
+       * Updated 4/14/15
+       */
+    
+      // Initialize mixpanel jQuery elements
+      var eventSelect = $('#eventSelect').MPEventSelect();
+      // var propSelect  = $('#propSelect').MPPropertySelect();
+      var dateSelect  = $('#dateSelect').MPDatepicker();
+      var dateResolution = $('#dateResolution').MPSelect({
+        items: [
+          { label: 'Minute', value: 'minute' },
+          { label: 'Hour', value: 'hour' },
+          { label: 'Day', value: 'day' },
+          { label: 'Week', value: 'week' },
+          { label: 'Month', value: 'month' }
+        ]
+      });
+      dateResolution.val('day');
+      var dateComparison = $('#dateComparison').MPSelect({
+        items: [
+          { label: 'Select a Comparison (optional)', value: '' },
+          { label: 'Previous Day', value: 'days' },
+          { label: 'Previous Week', value: 'weeks' },
+          { label: 'Previous Month', value: 'months' },
+          { label: 'Previous Year', value: 'years' }
+        ]
+      });
+      var eventGraph  = $('#graph').MPChart({chartType: 'line'});
+      var eventTable  = $('#table').MPTable({
+        showPercentages: false,
+        firstColHeader: 'Date'
+      });
+      var eventTableData;
+      var percentChangeValues;
+
+      Number.prototype.round = function(places) {
+        return +(Math.round(this + "e+" + places)  + "e-" + places);
+      };
+
+      // This is run when an event is selected from the dropdown.
+      function eventSelectHandler(e, eventName) {
+        // propSelect.MPPropertySelect('setEvent', eventName);
+        $("#by").show();
+        runQuery($(e.target));
+      };
+
+      // Invoked when the "Add Another Event" button is clicked. Creates another eventSelector menu
+      // and appends the proper event listeners.
+      function createEventSelect() {
+        var num = $('.eSel').length + 1;
+        var id = 'eventSelect' + num;
+        var eventSelect = $('#eventSelect').clone().attr('id', id);
+        eventSelect.on('change', eventSelectHandler);
+        eventSelect.MPEventSelect();
+        eventSelect.insertBefore($('#clearBoth'));
+      };
+      
+      // This is used to make the chart vertical, as opposed to the horizontal default.
+      function transformData(data) {
+        /** Rotate the data, e.g.
+         * Before:
+           {
+            	Activated: {
+            		2015-04-05: 371,
+            		2015-04-06: 1093,
+            	}, 
+            	Apple Mail - Validating Session: {
+            		2015-04-05: 1924,
+            		2015-04-06: 3882,
+            	}
+            }
+         *
+         * After:
+           {
+            	2015-04-05: {
+            		Activated: 371,
+            		Apple Mail - Validating Session: 1924,
+            	}, 
+            	2015-04-06: {
+            		Activated: 1093,
+            		Apple Mail - Validating Session: 1227,
+            }
+         */
+        output = {};
+        for (var eventName in data) {
+          for (var date in data[eventName]) {
+            if (date in output) {
+              output[date][eventName] = data[eventName][date];
+            } else {
+              output[date] = {};
+              output[date][eventName] = data[eventName][date];
+            }
+          }
+        }
+        
+        // Sort the data. First use an array to sort the dates (descending), then re-create an object
+        // using that array as its keys.
+        var keys = _.keys(output);
+        keys.sort(function(a,b){
+          // Turn your strings into dates, and then subtract them
+          // to get a value that is either negative, positive, or zero.
+          return new Date(a) - new Date(b);
+        });
+        var sorted = {};
+        _.each(keys, function(date) {
+          // Move over the nested object
+          sorted[date] = output[date];
+        });
+        return sorted;
+      };
+
+      function numberWithCommas(x) {
+        return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      };
+
+      function comparisonChange(data, pastData) {
+        var changeData = {};
+        for (var eventName in data) {
+          changeData[eventName] = {};
+          for (var date in data[eventName]) {
+            var pastDate = moment(date).subtract(1, dateComparison.val()).format('YYYY-MM-DD');
+            var ratio = (data[eventName][date] - pastData[eventName][pastDate])/pastData[eventName][pastDate];
+            changeData[eventName][date] = (ratio * 100).round(1);
+          }
+        }
+        return changeData;
+      };
+
+      function findHexColor(percent) {
+        if (percent < -66) {
+          return '#EDB7B7';
+        } else if (percent < -33 & percent >= -66) {
+          return '#FCE0E0';
+        } else if (percent < 0 & percent >= -33) {
+          return '#FEF7F7';
+        } else if (percent === 0) {
+          return '#FFFFFF';
+        } else if (percent < 33 & percent > 0) {
+          return '#F7FEF9';
+        } else if (percent < 66 & percent >= 33) {
+          return '#E3FDE3';
+        } else if (percent < 100 & percent >= 66) {
+          return '#C1F5C6';
+        } else if (percent >= 100) {
+          return '#8DCF93';
+        }
+      };
+
+      function applyCss(newValue, previousValues, columnIndex, eventNames, date) {
+        var percentElement = $('<span></span>');
+        var change;
+        var oldValue;
+        percentElement.addClass('percent');
+
+        if (dateComparison.val()) {
+          change = percentChangeValues[eventNames[columnIndex+1]][date];
+        } 
+        else {
+          oldValue = previousValues[columnIndex];
+          change = ((newValue - oldValue) / oldValue * 100).round(1);
+        }
+
+        percentElement.text(change + '%');
+
+        if (change > 0) {
+          percentElement.addClass('pos');
+        } else if (change < 0) {
+          percentElement.addClass('neg');
+        }
+
+        return {
+          element: percentElement,
+          color: findHexColor(change)
+        };
+      };
+
+      function addPercentChange(eventTableData) {
+        var eventNames = [];
+        var date;
+        var previousValues = [];
+        var columnIndex = 0;
+        
+        _.each($('.mp_chart_cell'), function(cell) {
+          if ($(cell).parent().hasClass('mp_chart_header')) {
+            eventNames.push($(cell).children('span:first').text());
+          } else if ($(cell).hasClass('mp_chart_row_label')) {
+            columnIndex = 0;
+            date = $(cell).children('span:first').text();
+          } else {
+            if (previousValues[columnIndex]) {
+              var newValue = parseInt($(cell).first().text());
+              var change = applyCss(newValue, previousValues, columnIndex, eventNames, date, percentChangeValues);
+              $(cell).append(change.element);
+              $(cell).css('background-color', change.color);
+              $(cell).children('span:first').text(numberWithCommas(newValue));
+              previousValues[columnIndex] = newValue;
+              columnIndex += 1;
+            } else {
+              var value = $(cell).children('span:first').text();
+              previousValues[columnIndex] = parseInt(value);
+              $(cell).children('span:first').text(numberWithCommas(value));
+              columnIndex += 1;
+            }
+          }
+        });
+      };
+
+      /**
+       * Update MPTable with new data or initial data
+       * @var eventTableData is a stateful object representing the data to be visualized. 
+       */ 
+      function renderTable(results, pastData) {
+        values = results.values();
+        pastValues = pastData ? pastData.values() : {};
+        
+        if (dateComparison.val() && typeof percentChangeValues === 'undefined') {
+          percentChangeValues = comparisonChange(values, pastValues);
+        } else if (dateComparison.val()) {
+          console.log(percentChangeValues);
+          newChangeValues = comparisonChange(values, pastValues);
+          for (var key in newChangeValues) {
+            percentChangeValues[key] = newChangeValues[key];
+          }
+        }
+        
+        if (typeof eventTableData === 'undefined') {
+          eventTableData = values;
+        } else {
+          for (var key in values) {
+            eventTableData[key] = values[key];
+          }
+        }
+        
+        var rotatedData = transformData(eventTableData);
+        eventTable.MPTable('setData', rotatedData);
+        addPercentChange(eventTableData, percentChangeValues);
+      };
+      
+      /**
+       * Query the mixpanel API. 
+       * @param { MPEventSelect } eventSelect - the mixpanel jQuery element which contains the selected event
+       */
+      function runQuery(eventSelect) {
+        var eventName = eventSelect.MPEventSelect('value');
+        // var propName  = propSelect.MPPropertySelect('value');
+        var dateRange = dateSelect.MPDatepicker('value');
+        var params = _.extend(dateRange, { unit: dateResolution.val() });
+        if (eventName) {
+          var pastData;
+          if (dateComparison.val()) {
+            oldDateRange = {};
+            oldDateRange.from = moment(dateRange.from).subtract(1, dateComparison.val())._d;
+            oldDateRange.to = moment(dateRange.to).subtract(1, dateComparison.val())._d;
+            oldParams = _.extend(oldDateRange, { unit: dateResolution.val() });
+            MP.api.segment(eventName, oldParams).done(function(results) {
+              pastData = results;
+            });
+          }
+          MP.api.segment(eventName, params).done(function(results) {
+            renderTable(results, pastData);
+          });
+        }
+      };
+      
+      $('#add_event_button').click(function() {
+        createEventSelect();
+      });
+      
+      // Start here!
+      dateSelect.on('change', runQuery);
+      eventSelect.on('change', eventSelectHandler);
     </script>
   </body>
 </html>
