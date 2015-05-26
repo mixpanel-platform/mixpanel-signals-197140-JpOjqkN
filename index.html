@@ -132,25 +132,25 @@ Visit the report from the sidebar dropdown instead of clicking "RUN" -->
         /** Rotate the data, e.g.
          * Before:
            {
-            	Activated: {
-            		2015-04-05: 371,
-            		2015-04-06: 1093,
-            	}, 
-            	Apple Mail - Validating Session: {
-            		2015-04-05: 1924,
-            		2015-04-06: 3882,
-            	}
+              Activated: {
+                2015-04-05: 371,
+                2015-04-06: 1093,
+              }, 
+              Apple Mail - Validating Session: {
+                2015-04-05: 1924,
+                2015-04-06: 3882,
+              }
             }
          *
          * After:
            {
-            	2015-04-05: {
-            		Activated: 371,
-            		Apple Mail - Validating Session: 1924,
-            	}, 
-            	2015-04-06: {
-            		Activated: 1093,
-            		Apple Mail - Validating Session: 1227,
+              2015-04-05: {
+                Activated: 371,
+                Apple Mail - Validating Session: 1924,
+              }, 
+              2015-04-06: {
+                Activated: 1093,
+                Apple Mail - Validating Session: 1227,
             }
          */
         output = {};
@@ -187,11 +187,26 @@ Visit the report from the sidebar dropdown instead of clicking "RUN" -->
 
       function comparisonChange(data, pastData) {
         var changeData = {};
+        var hourFormat;
+        console.log(dateComparison.val());
+        if (dateResolution.val() === 'minute' || dateResolution.val() === 'hour') {
+          hourFormat = true;
+        } else {
+          hourFormat = false;
+        }
         for (var eventName in data) {
           changeData[eventName] = {};
           for (var date in data[eventName]) {
-            var pastDate = moment(date).subtract(1, dateComparison.val()).format('YYYY-MM-DD');
+            if (hourFormat) {
+              var pastDate = moment(date).subtract(1, dateComparison.val()).format('YYYY-MM-DD HH:mm:ss');  
+            } else {
+              var pastDate = moment(date).subtract(1, dateComparison.val()).format('YYYY-MM-DD');
+            }
+            // console.log(pastDate);
+            // console.log(data[eventName][date]);
+            // console.log(pastData[eventName][pastDate]);
             var ratio = (data[eventName][date] - pastData[eventName][pastDate])/pastData[eventName][pastDate];
+            // console.log(ratio);
             changeData[eventName][date] = (ratio * 100).round(1);
           }
         }
@@ -284,9 +299,10 @@ Visit the report from the sidebar dropdown instead of clicking "RUN" -->
       function renderTable(results, pastData) {
         values = results.values();
         pastValues = pastData ? pastData.values() : {};
-        
+        console.log(pastValues);
         if (dateComparison.val() && typeof percentChangeValues === 'undefined') {
           percentChangeValues = comparisonChange(values, pastValues);
+          console.log(percentChangeValues);
         } else if (dateComparison.val()) {
           console.log(percentChangeValues);
           newChangeValues = comparisonChange(values, pastValues);
@@ -313,6 +329,7 @@ Visit the report from the sidebar dropdown instead of clicking "RUN" -->
        * @param { MPEventSelect } eventSelect - the mixpanel jQuery element which contains the selected event
        */
       function runQuery(eventSelect) {
+        console.log(eventSelect);
         var eventName = eventSelect.MPEventSelect('value');
         // var propName  = propSelect.MPPropertySelect('value');
         var dateRange = dateSelect.MPDatepicker('value');
@@ -329,6 +346,8 @@ Visit the report from the sidebar dropdown instead of clicking "RUN" -->
             });
           }
           MP.api.segment(eventName, params).done(function(results) {
+            // console.log(pastData.values());
+            // console.log(results.values());
             renderTable(results, pastData);
           });
         }
