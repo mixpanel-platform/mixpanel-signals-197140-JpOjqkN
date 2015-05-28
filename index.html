@@ -78,6 +78,10 @@ Visit the report from the sidebar dropdown instead of clicking "RUN" -->
       var eventSelect = $('#eventSelect').MPEventSelect();
       // var propSelect  = $('#propSelect').MPPropertySelect();
       var dateSelect  = $('#dateSelect').MPDatepicker();
+      dateSelect.val({
+        from: moment().startOf('day'),
+        to: moment().startOf('day').add(1, 'days')
+      });
       var dateResolution = $('#dateResolution').MPSelect({
         items: [
           { label: 'Minute', value: 'minute' },
